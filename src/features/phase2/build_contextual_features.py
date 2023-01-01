@@ -8,9 +8,6 @@ from keras.preprocessing.sequence import pad_sequences
 # load arguments
 args = getArguments() # get all the experimental arguments
 
-# load tokenizer
-tokenizer, _ = choose_tokenizer_type( args.embed )
-
 def tokenize_and_preserve_labels(sentence, text_labels, pos, tokenizer):
 
     tokenized_sentence = []
@@ -119,12 +116,16 @@ def createAttnMask(input_ids, input_lbs):
 
 def transform(df, tokenizer, max_length, pretrained_model, args):
 
+    tokens_trans = []
+    labels_trans = []
+    pos_trans = []
+    masks_trans = []
+
     if args.use_lemma == True:
         tokens = list(df['lemma'])
     else:
         tokens = list(df['tokens'])
 
-    tokenized = []
     for tokens, labels, pos in zip( tokens, list(df['labels']), list(df['pos']) ) :
 
         # Tokenize and preserve labels
@@ -190,3 +191,18 @@ def transform(df, tokenizer, max_length, pretrained_model, args):
 
 
         assert len( input_ids ) == len( input_labels ) == len( input_pos )
+
+
+        # Get the attention masks
+        # TODO: Also mask the input ids that have labels [0.5,0.5]
+        attention_masks = createAttnMask( [input_ids], [input_labels] ) 
+
+        assert len(input_ids.squeeze()) == len(input_labels.squeeze()) == len(attention_masks.squeeze()) == len(input_pos.squeeze()) == max_length
+
+        tokens_trans.append( input_ids.squeeze() ) 
+        labels_trans.append( input_labels.squeeze() ) 
+        pos_trans.append( attention_masks.squeeze() ) 
+        masks_trans.append( input_pos.squeeze() ) 
+
+
+    return tokens_trans, labels_trans, pos_trans, masks_trans
