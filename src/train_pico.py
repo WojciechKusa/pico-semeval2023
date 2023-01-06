@@ -5,6 +5,8 @@
 from ast import arg
 import warnings
 
+from load_pico import fetch_val
+
 warnings.simplefilter(action='ignore', category=FutureWarning)
 
 import argparse
@@ -62,6 +64,9 @@ from transformers import (AdamW, AutoModel, AutoModelForTokenClassification,
 
 warnings.filterwarnings('ignore')
 
+# mlflow 
+from utilities.mlflow_logging import *
+
 def printMetrics(cr, args):
 
     if args.num_labels == 5:   
@@ -75,6 +80,38 @@ def printMetrics(cr, args):
 def flattenIt(x):
 
     return np.asarray(x.cpu(), dtype=np.float32).flatten()
+
+def constrained_beam_search(x, cbs_constraints):
+
+    # if 'cuda' in str(cbs_constraints.device):
+    if isinstance(cbs_constraints, np.ndarray) == False:
+
+        temp_list = cbs_constraints.tolist()
+        if len(set(temp_list)) > 2:
+     
+            start_index = cbs_constraints.tolist().index(1)
+            end_index = cbs_constraints.tolist().index(2)
+
+            # set all the predictions before start index to 0
+            x[0:start_index] = torch.Tensor([0]) * len( x[0:start_index] )
+
+            # Set all the predictions after end index to 0
+            x[end_index:] = torch.Tensor([0]) * len( x[end_index:] )
+
+    else:
+    
+        # Do a constrained beam search only when both start and end indices are present
+        if len(set(cbs_constraints)) > 2:
+            start_index = list(cbs_constraints).index(1)
+            end_index = list(cbs_constraints).index(2)
+
+            # set all the predictions before start index to 0
+            x[0:start_index] = [0] * len( x[0:start_index] )
+
+            # Set all the predictions after end index to 0
+            x[end_index:] = [0] * len( x[end_index:] )
+
+    return x
 
 
 def evaluate(defModel, optimizer, scheduler, development_dataloader, exp_args, epoch_number = None, mode=None):
@@ -95,10 +132,11 @@ def evaluate(defModel, optimizer, scheduler, development_dataloader, exp_args, e
 
         eval_epochs_logits_coarse_i = np.empty(1, dtype=np.int64)
         eval_epochs_labels_coarse_i = np.empty(1, dtype=np.int64)
+        eval_epochs_cbs_coarse_i = np.empty(1, dtype=np.int64)
 
         class_rep_temp = []
 
-        for e_input_ids_, e_labels, e_input_mask, e_input_pos in development_dataloader:
+        for e_input_ids_, e_labels, e_input_mask, e_input_pos, e_input_offsets in development_dataloader:
 
             e_input_ids_ = e_input_ids_.to(f'cuda:{defModel.device_ids[0]}')
 
@@ -109,13 +147,15 @@ def evaluate(defModel, optimizer, scheduler, development_dataloader, exp_args, e
             e_input_mask = e_input_mask.to(f'cuda:{defModel.device_ids[0]}')
             e_labels = e_labels.to(f'cuda:{defModel.device_ids[0]}')
             e_input_pos = e_input_pos.to(f'cuda:{defModel.device_ids[0]}')
+            e_input_offsets = e_input_offsets.to(f'cuda:{defModel.device_ids[0]}')
 
             # print( e_input_ids.shape )
             # print( e_input_mask.shape )
             # print( e_labels.shape )
             # print( e_input_pos.shape )
+            # print( e_input_offsets.shape )
 
-            e_loss, e_output, e_output_masks, e_labels, e_labels_mask, e_mask = defModel(e_input_ids, attention_mask=e_input_mask, labels=e_labels, input_pos=e_input_pos, mode = mode, args = exp_args) 
+            e_loss, e_output, e_output_masks, e_labels, e_labels_mask, e_mask = defModel(e_input_ids, attention_mask=e_input_mask, labels=e_labels, input_pos=e_input_pos, input_offs=e_input_offsets, mode = mode, args = exp_args) 
 
             # # shorten the input_ids to match the e_output shape (This is to retrieve the natural langauge words from the input IDs)
             # e_input_ids = e_input_ids[:, :e_output.shape[1]]   
@@ -134,26 +174,35 @@ def evaluate(defModel, optimizer, scheduler, development_dataloader, exp_args, e
             for i in range(0, e_labels.shape[0]):
 
                 # convert continuous probas to classes for b_output and b_labels
-                e_output_class = torch.argmax(e_output[i, ], dim=1)
+                if 'crf' not in exp_args.model:
+                    e_output_class = torch.argmax(e_output[i, ], dim=1)
+                else:
+                    e_output_class = e_output[i, ]
+
                 if mode == 'test' or exp_args.supervision == 'fs':
                     e_label_class = e_labels[i, ]
+                    e_input_offsets_class = e_input_offsets[i, ]
                 elif exp_args.supervision == 'ws':
                     e_label_class = torch.argmax(e_labels[i, ], dim=1)
 
-
                 selected_preds_coarse = torch.masked_select( e_output_class, e_mask[i, ])
-                # print( selected_preds_coarse.shape )
                 selected_labs_coarse = torch.masked_select( e_label_class, e_mask[i, ])
-                # print( selected_labs_coarse.shape )
+                selected_offs_coarse = torch.masked_select( e_input_offsets_class, e_mask[i, ])
 
                 if selected_preds_coarse.shape != selected_labs_coarse.shape:
                     print( selected_preds_coarse.shape, ' : ', selected_labs_coarse.shape  )
 
                 selected_preds_coarse = selected_preds_coarse.detach().to("cpu").numpy()
                 selected_labs_coarse = selected_labs_coarse.detach().to("cpu").numpy()
+                selected_offs_coarse = selected_offs_coarse.detach().to("cpu").numpy()
+
+                # TODO: Run the Constrained Beam Search here. Add an if statement for CBS or not...
+                if exp_args.cbs == True:
+                    selected_preds_coarse = constrained_beam_search( selected_preds_coarse, selected_offs_coarse )
 
                 eval_epochs_logits_coarse_i = np.append(eval_epochs_logits_coarse_i, selected_preds_coarse, 0)
                 eval_epochs_labels_coarse_i = np.append(eval_epochs_labels_coarse_i, selected_labs_coarse, 0)
+                eval_epochs_cbs_coarse_i = np.append( eval_epochs_cbs_coarse_i, selected_offs_coarse, 0 )
 
         #         temp_cr = classification_report(y_pred= masked_preds.cpu(), y_true=masked_labs.cpu(), labels=list(range(exp_args.num_labels)), output_dict=True) 
         #         class_rep_temp.append(temp_cr['macro avg']['f1-score'])
@@ -187,10 +236,10 @@ def evaluate(defModel, optimizer, scheduler, development_dataloader, exp_args, e
         # # all_tokens_flat = np.asarray(selected_tokens_coarse.cpu(), dtype=np.int64).flatten()
 
         # Final classification report and confusion matrix for each epoch
-        val_cr = classification_report(y_pred= eval_epochs_logits_coarse_i, y_true=eval_epochs_labels_coarse_i, labels=list(range(exp_args.num_labels)), output_dict=True)
-        # f1, f1_1 = printMetrics(val_cr, exp_args)
-        # print('Test: Epoch {} with macro average F1: {}, F1 score (entity): {}'.format(epoch_number, f1, f1_1))
+        # print( len( eval_epochs_logits_coarse_i ) )
+        # print( len( eval_epochs_cbs_coarse_i ) )
 
+        val_cr = classification_report(y_pred= eval_epochs_logits_coarse_i, y_true=eval_epochs_labels_coarse_i, labels=list(range(exp_args.num_labels)), output_dict=True, digits=4)
 
         # confusion_matrix and plot
         labels = [0, 1]
@@ -227,8 +276,9 @@ def train(defModel, optimizer, scheduler, train_dataloader, development_dataload
                 b_labels = batch[1].to(f'cuda:{defModel.device_ids[0]}')
                 b_masks = batch[2].to(f'cuda:{defModel.device_ids[0]}')
                 b_pos = batch[3].to(f'cuda:{defModel.device_ids[0]}')
+                b_input_offs = batch[4].to(f'cuda:{defModel.device_ids[0]}')
 
-                b_loss, b_output, b_output_masks, b_labels, b_labels_mask, b_mask = defModel(input_ids = b_input_ids, attention_mask=b_masks, labels=b_labels, input_pos=b_pos, args = exp_args)                
+                b_loss, b_output, b_output_masks, b_labels, b_labels_mask, b_mask = defModel(input_ids = b_input_ids, attention_mask=b_masks, labels=b_labels, input_pos=b_pos, input_offs = b_input_offs, args = exp_args)                
 
                 total_train_loss += abs( torch.mean(b_loss) ) 
 
@@ -246,37 +296,60 @@ def train(defModel, optimizer, scheduler, train_dataloader, development_dataload
                 for i in range(0, b_labels.shape[0]): # masked select excluding the post padding 
 
                     # convert continuous probas to classes for b_output and b_labels
-                    b_output_class = torch.argmax(b_output[i, ], dim=1)
+                    if 'crf' not in exp_args.model:
+                        b_output_class = torch.argmax(b_output[i, ], dim=1)
+                    else:
+                        b_output_class = b_output[i, ]
                     if exp_args.supervision == 'ws':
                         b_label_class = torch.argmax(b_labels[i, ], dim=1)
                     elif exp_args.supervision == 'fs':
                         b_label_class = b_labels[i, ]
+                        b_input_offsets_class = b_input_offs[i, ]
 
                     selected_preds_coarse = torch.masked_select( b_output_class, b_mask[i, ])
                     selected_labs_coarse = torch.masked_select( b_label_class, b_mask[i, ])
+                    selected_offs_coarse = torch.masked_select( b_input_offsets_class, b_mask[i, ])
 
                     selected_preds_coarse = selected_preds_coarse.detach().to("cpu").numpy()
                     selected_labs_coarse = selected_labs_coarse.detach().to("cpu").numpy()
+                    selected_offs_coarse = selected_offs_coarse.detach().to("cpu").numpy()
+
+                    # TODO: Run the Constrained Beam Search here. Add an if statement for CBS or not...
+                    if exp_args.cbs == True:
+                        selected_preds_coarse = constrained_beam_search( selected_preds_coarse, selected_offs_coarse )
 
                     train_epoch_logits_coarse_i = np.append(train_epoch_logits_coarse_i, selected_preds_coarse, 0)
                     train_epochs_labels_coarse_i = np.append(train_epochs_labels_coarse_i, selected_labs_coarse, 0)
 
                 if step % exp_args.print_every == 0:
                     cr = sklearn.metrics.classification_report(y_pred= train_epoch_logits_coarse_i, y_true= train_epochs_labels_coarse_i, labels= list(range(exp_args.num_labels)), output_dict=True)
-                    f1, f1_1, f1_2, f1_3 = printMetrics(cr, exp_args)
-                    print('Training: Epoch {} with macro average F1: {}, F1 (Pop): {}, F1 (Int): {}, F1 (Out): {}'.format(epoch_i, f1, f1_1, f1_2, f1_3))
+                    f1, f1_1 = printMetrics(cr, exp_args)
+                    if exp_args.log == True:
+                        logMetrics("train macro f1", f1, epoch_i)
+                        logMetrics(f"train f1 {exp_args.entity}", f1_1, epoch_i)
+                    print('Training: Epoch {} with macro average F1: {}, F1 {}: {}'.format(epoch_i, f1, exp_args.entity, f1_1))
 
 
             ## Calculate the average loss over all of the batches.
             avg_train_loss = total_train_loss / len(train_dataloader)
 
-            train_cr = classification_report(y_pred= train_epoch_logits_coarse_i, y_true=train_epochs_labels_coarse_i, labels= list(range(exp_args.num_labels)), output_dict=True)             
+            train_cr = classification_report(y_pred= train_epoch_logits_coarse_i, y_true=train_epochs_labels_coarse_i, labels= list(range(exp_args.num_labels)), output_dict=True, digits=4)             
 
             val_cr, eval_epochs_logits_coarse_i, eval_epochs_labels_coarse_i, cm  = evaluate(defModel, optimizer, scheduler, development_dataloader, exp_args, epoch_i)
            
-            val_f1, val_f1_1, val_f1_2, val_f1_3 = printMetrics(val_cr, exp_args)
+            val_f1, val_f1_1 = printMetrics(val_cr, exp_args)
+            if exp_args.log == True:
+                logMetrics("val macro f1", val_f1, epoch_i)
+                logMetrics(f"val f1 {exp_args.entity}", val_f1_1, epoch_i)
+
             string2print = "val f1" + str(exp_args.entity)
-            print('Validation: Epoch {} with macro average F1: {}, F1 (Pop): {}, F1 (Int): {}, F1 (Out): {}'.format(epoch_i, val_f1, val_f1_1, val_f1_2, val_f1_3))
+            print('Validation: Epoch {} with macro average F1: {}, F1 {}: {}'.format(epoch_i, val_f1, exp_args.entity, val_f1_1))
+
+             # If this is the last epoch then print the classification metrics
+            if epoch_i == (exp_args.max_eps - 1):
+                print( val_cr['macro avg']['precision'], ',', val_cr['macro avg']['recall'], ',', val_cr['macro avg']['f1-score']
+                , ',', val_cr['1']['precision'], ',', val_cr['1']['recall'], ',', val_cr['1']['f1-score']
+                , ',', val_cr['0']['precision'], ',', val_cr['0']['recall'], ',', val_cr['0']['f1-score'] )
 
             # # Process of saving the model
             if val_f1 > best_f1:
