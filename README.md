@@ -3,6 +3,29 @@ PICO SemEval shared task
 
 PICO extraction shared task for SemEval 2023
 
+## Installation
+
+1. Install Anaconda/Miniconda
+
+2. Install the environment:
+
+```bash
+conda create -n pico-semeval2023 python=3.9.15
+```
+
+3. Activate the environment:
+
+```bash
+conda activate pico-semeval2023
+```
+
+4. Install packages:
+
+```bash
+pip install -r requirements.txt
+```
+
+
 Project Organization
 ------------
 
