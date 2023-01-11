@@ -10,6 +10,8 @@ import time
 import numpy as np
 
 
+
+
 #loading the scispacy model
 nlp = spacy.load('en_core_sci_sm')
 
