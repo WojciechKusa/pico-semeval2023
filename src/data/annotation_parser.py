@@ -1,4 +1,5 @@
 # imports
+import os.path
 
 import pandas as pd
 import ast
@@ -10,31 +11,15 @@ import time
 import numpy as np
 
 
-
-
 #loading the scispacy model
 nlp = spacy.load('en_core_sci_sm')
 
-
-# open file
-file_path_train = '/mnt/nas2/data/systematicReview/semeval2023/data/st2_train_inc_text.csv'
-file_path_test = '/mnt/nas2/data/systematicReview/semeval2023/data/st2_test_inc_text.csv'
-
-df_train = pd.read_csv(file_path_train, sep=',')
-train_df = df_train.to_dict('records')
-
-df_test = pd.read_csv(file_path_test, sep=',')
-test_df = df_test.to_dict('records')
 
 # Ignore the delted posts
 deleted_list = ['[deleted]', '[removed]', 'deleted by user']
 
 
-# Label mapping
-picos_mapping = {'population': 1, 'intervention':2, 'outcome':3}
-
-
-def get_char_labels(df):
+def get_char_labels(df, picos_mapping, task_id):
     
     # parse dataframe and fetch annotations in a dict
 
@@ -49,7 +34,11 @@ def get_char_labels(df):
         post_id = row['post_id']
         #print( post_id )
 
-        claim = row['claim']
+        try:
+            claim = row['claim']
+        except KeyError:
+            # for stage1
+            claim = 0
         #print('Claim: ', claim)
 
         full_text = row['text']
@@ -62,7 +51,7 @@ def get_char_labels(df):
         else:
             # If the post was not removed by the user
             # Get entities
-            stage2_labels = ast.literal_eval( row['stage2_labels']  )
+            stage2_labels = ast.literal_eval( row[f'stage{task_id}_labels']  )
             #print( 'MAIN:     ', stage2_labels )
             stage2_labels = stage2_labels[0]['crowd-entity-annotation']['entities']
             #print( 'OFFSHOOT:     ', stage2_labels )
@@ -72,9 +61,14 @@ def get_char_labels(df):
             #print( 'full_text_indices:     ', full_text_indices )
 
             label_each_char = [0] * len(full_text) # Generate a 0 label for each character in the full text
-            
-            claim_start = full_text.index(claim)
-            claim_end = claim_start + len(claim)
+
+            if claim != 0:
+                claim_start = full_text.index(claim)
+                claim_end = claim_start + len(claim)
+            else:
+                # for stage1
+                claim_start = 0
+                claim_end = 0
 
             for l in stage2_labels:
                 extrct_annot = row['text'][ l['startOffset'] : l['endOffset'] ]
@@ -103,12 +97,6 @@ def get_char_labels(df):
     return labels, claim_offsets
 
 
-# Get the labels for train dataframe
-labels_train, claim_offsets = get_char_labels(train_df)
-df_train['labels_char'] = labels_train
-df_train['claim_offsets'] = claim_offsets
-
-
 def get_token_labels(df):
     
     tokens_series = []
@@ -120,7 +108,7 @@ def get_token_labels(df):
         reddit_id = row['subreddit_id']
 
         post_id = row['post_id']
-        claim = row['claim']
+        # claim = row['claim']
         full_text = row['text']
         char_labels = row['labels_char']
         
@@ -172,16 +160,43 @@ def get_token_labels(df):
     return tokens_series, labels_series
 
 
-# Get the labels for train dataframe
-train_df = df_train.to_dict('records')
-text_tokens, token_labels = get_token_labels(train_df)
+if __name__ == '__main__':
+    task_id = '1'  # 1 for stage 1, 2 for stage 2
 
+    # Label mapping
+    if task_id == '2':
+        picos_mapping = {'population': 1, 'intervention': 2, 'outcome': 3}
+    elif task_id == '1':
+        picos_mapping = {'question': 1, 'per_exp': 2, 'claim': 3, 'claim_per_exp': 4}
+    else:
+        raise ValueError('Task ID not defined')
 
-df_train['tokens'] = text_tokens
-df_train['labels'] = token_labels
+    print(os.getcwd())
+    # open file
+    file_path_train = f'../../data/external/st{task_id}_public_data/st{task_id}_train_inc_text.csv'
+    file_path_test = f'../../data/external/st{task_id}_public_data/st{task_id}_test_inc_text.csv'
 
+    df_train = pd.read_csv(file_path_train, sep=',')
+    train_df = df_train.to_dict('records')
 
-# dump the dataframe to a csv file
+    df_test = pd.read_csv(file_path_test, sep=',')
+    test_df = df_test.to_dict('records')
 
-write_parsed = '/mnt/nas2/data/systematicReview/semeval2023/data/parsed/st2_train_parsed.tsv'
-#df_train.to_csv(write_parsed, encoding='utf-8', sep='\t')
+    # Get the labels for train dataframe
+    labels_train, claim_offsets = get_char_labels(train_df, picos_mapping=picos_mapping, task_id=task_id)
+    df_train['labels_char'] = labels_train
+    df_train['claim_offsets'] = claim_offsets
+
+    # Get the labels for train dataframe
+    train_df = df_train.to_dict('records')
+    text_tokens, token_labels = get_token_labels(train_df)
+
+    df_train['tokens'] = text_tokens
+    df_train['labels'] = token_labels
+
+    # dump the dataframe to a csv file
+    if not os.path.exists(f"../../data/processed/st{task_id}_public_data"):
+        os.makedirs(f"../../data/processed/st{task_id}_public_data")
+
+    write_parsed = f'../../data/processed/st{task_id}_public_data/st{task_id}_train_parsed.tsv'
+    df_train.to_csv(write_parsed, encoding='utf-8', sep='\t')
