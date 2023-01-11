@@ -50,6 +50,12 @@ with open(f"{data_path}/st1_train_tokens.txt", 'r') as f:
     texts = f.readlines()
 texts = [x.split() for x in texts]
 
+# remove non alphanumeric characters
+texts = [[re.sub(r'\W+', '', x) for x in doc] for doc in texts]
+# texts = [re.sub(r'\s', ' ', x) for x in texts]
+# if token is empty string replace with UNK
+texts = [[x if x != '' else '[UNK]' for x in doc] for doc in texts]
+
 with open(f"{data_path}/st1_train_bio_tokens.txt", 'r') as f:
     tags = f.readlines()
 tags = [x.split() for x in tags]
@@ -59,10 +65,10 @@ print("loaded")
 # tags = tags[:20]
 
 # keep only first 400 tokens in tags list
-tags = [x[:330] for x in tags]
-texts = [x[:330] for x in texts]
+tags = [x[:220] for x in tags]
+texts = [x[:220] for x in texts]
 
-train_texts, val_texts, train_tags, val_tags = train_test_split(texts, tags, test_size=.2, random_state=42)
+train_texts, val_texts, train_tags, val_tags = train_test_split(texts, tags, test_size=.4, random_state=42)
 
 unique_tags = {tag for doc in tags for tag in doc}
 tag2id = {tag: _id for _id, tag in enumerate(unique_tags)}
@@ -80,7 +86,7 @@ encodings = tokenizer(texts, is_split_into_words=True, return_offsets_mapping=Tr
 for i in range(len(tags)):
     print(i, len(texts[i]), len(tags[i]), len(encodings['input_ids'][i]), len(encodings['offset_mapping'][i]))
 
-train_labels = encode_tags(tags, encodings)
+# train_labels = encode_tags(tags, encodings)
 
 
 train_labels = encode_tags(train_tags, train_encodings)
@@ -93,26 +99,47 @@ val_dataset = PICODataset(val_encodings, val_labels)
 
 model = DistilBertForTokenClassification.from_pretrained('distilbert-base-cased', num_labels=len(unique_tags))
 
+device = torch.device("mps")
+model.to(device)
+
 training_args = TrainingArguments(
     output_dir='./results',          # output directory
-    num_train_epochs=3,              # total number of training epochs
-    per_device_train_batch_size=16,  # batch size per device during training
-    per_device_eval_batch_size=64,   # batch size for evaluation
+    num_train_epochs=2,              # total number of training epochs
+    per_device_train_batch_size=10,  # batch size per device during training
+    per_device_eval_batch_size=32,   # batch size for evaluation
     warmup_steps=500,                # number of warmup steps for learning rate scheduler
     weight_decay=0.01,               # strength of weight decay
     logging_dir='./logs',            # directory for storing logs
     logging_steps=10,
+    use_mps_device=True,
 )
+
+
+import numpy as np
+import evaluate
+acc = evaluate.load("accuracy")
+macro_f1 = evaluate.load("macro_f1")
+
+
+def compute_metrics(eval_pred):
+    logits, labels = eval_pred
+    predictions = np.argmax(logits, axis=-1)
+    return macro_f1.compute(predictions=predictions, references=labels)
+
+# train model on gpu
+
 
 trainer = Trainer(
     model=model,                         # the instantiated 🤗 Transformers model to be trained
     args=training_args,                  # training arguments, defined above
     train_dataset=train_dataset,         # training dataset
-    eval_dataset=val_dataset             # evaluation dataset
+    eval_dataset=val_dataset,             # evaluation dataset
+    compute_metrics=compute_metrics,
 )
 
 trainer.train()
 
+trainer.evaluate()
 
 # optimizer = AdamW(model.parameters(), lr=5e-6)
 #
