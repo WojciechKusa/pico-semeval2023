@@ -1,6 +1,5 @@
 import os.path
 
-import numpy as np
 from transformers import DistilBertTokenizerFast, TrainingArguments, Trainer
 from transformers import DistilBertForTokenClassification, AdamW
 from sklearn.model_selection import train_test_split

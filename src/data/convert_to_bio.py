@@ -38,11 +38,8 @@ for i in range(len(entities)):
         # bio_tokens.append(['O'] * len(tokenized[i]))
         continue
 
-    if not entities[i]:
-        bio_tokens.append(['O' for x in tokenized[i]])
-        # continue
-    else:
-        bio_tokens.append(['O' for x in tokenized[i]])
+    bio_tokens.append(['O' for _ in tokenized[i]])
+    if entities[i]:
         for entity in entities[i]:
             start = entity['startOffset']
             start = convert_char_to_word_pos(text[i], start)
