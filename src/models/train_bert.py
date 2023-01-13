@@ -1,18 +1,16 @@
 import os.path
 
 from transformers import DistilBertTokenizerFast, TrainingArguments, Trainer
-from transformers import DistilBertForTokenClassification, AdamW
+from transformers import DistilBertForTokenClassification
 from sklearn.model_selection import train_test_split
 import torch
 import re
 import numpy as np
 import evaluate
-from datasets import load_metric
 
 import wandb
 
 wandb.init(project="pico-semeval-task1")
-
 
 
 def encode_tags(tags, encodings):
@@ -61,7 +59,7 @@ with open(f"{data_path}/st1_train_tokens.txt", "r") as f:
     texts = f.readlines()
 texts = [x.split() for x in texts]
 
-# remove non alphanumeric characters
+# remove non-alphanumeric characters
 texts = [[re.sub(r"\W+", "", x) for x in doc] for doc in texts]
 # texts = [re.sub(r'\s', ' ', x) for x in texts]
 # if token is empty string replace with UNK
@@ -71,6 +69,13 @@ with open(f"{data_path}/st1_train_bio_tokens.txt", "r") as f:
     tags = f.readlines()
 tags = [x.split() for x in tags]
 print("loaded")
+
+print(len(texts), len(tags))
+# remove rows from tags and texts when text == [UNK]
+tags = [y for x, y in zip(texts, tags) if x != ['UNK']]
+texts = [x for x in texts if x != ['UNK']]
+print(len(texts), len(tags))
+
 
 # texts = texts[:500]
 # tags = tags[:500]
@@ -83,13 +88,12 @@ train_texts, val_texts, train_tags, val_tags = train_test_split(
     texts, tags, test_size=0.2, random_state=42
 )
 
-unique_tags = {tag for doc in tags for tag in doc}
-tag2id = {tag: _id for _id, tag in enumerate(unique_tags)}
+label_list = list({tag for doc in tags for tag in doc})
+tag2id = {tag: _id for _id, tag in enumerate(label_list)}
 id2tag = {_id: tag for tag, _id in tag2id.items()}
 print(tag2id)
 print(id2tag)
-print(unique_tags)
-label_list = list(unique_tags)
+print(label_list)
 
 model_name = "distilbert-base-uncased"
 
@@ -131,7 +135,7 @@ if not os.path.exists(results_folder):
     os.makedirs(results_folder)
 
 model = DistilBertForTokenClassification.from_pretrained(
-    model_name, num_labels=len(unique_tags)
+    model_name, num_labels=len(label_list)
 )
 # model = AutoModelForTokenClassification.from_pretrained(model_checkpoint, num_labels=len(label_list))
 
@@ -141,37 +145,19 @@ model.to(device)
 
 training_args = TrainingArguments(
     output_dir=results_folder,
-    num_train_epochs=10,
+    num_train_epochs=20,
     evaluation_strategy = "epoch",
-    per_device_train_batch_size=32,
-    per_device_eval_batch_size=64,
+    per_device_train_batch_size=64,
+    per_device_eval_batch_size=128,
     # warmup_steps=500,
     weight_decay=0.01,
     logging_dir="../../reports",
     logging_steps=10,
-    # use_mps_device=True,
     report_to=["wandb"],
     full_determinism=True,
 )
 
-
-acc = evaluate.load("accuracy")
-macro_f1 = evaluate.load("f1")
-seqeval_metric = load_metric("seqeval")
-
-# def compute_metrics(eval_pred):
-#     logits, labels = eval_pred
-#     predictions = np.argmax(logits, axis=-1)
-#     acc_score = 0
-#     f1_score = 0
-#     for pred, true, in zip(predictions, labels):
-#         acc_score += acc.compute(predictions=pred, references=true)['accuracy']
-#         f1_score += macro_f1.compute(predictions=pred, references=true, average='macro')['f1']
-#
-#     return {
-#         "accuracy": acc_score/len(predictions),
-#         "f1": f1_score/len(predictions)
-#     }
+seqeval_metric = evaluate.load("seqeval")
 
 
 def compute_metrics(p):
@@ -189,16 +175,17 @@ def compute_metrics(p):
     ]
 
     results = seqeval_metric.compute(predictions=true_predictions, references=true_labels)
-    print(true_labels[0], true_predictions[0])
+    print(true_labels[0])
+    print(true_predictions[0])
+    print()
+    print(true_labels[-1])
+    print(true_predictions[-1])
     return {
         "precision": results["overall_precision"],
         "recall": results["overall_recall"],
         "f1": results["overall_f1"],
         "accuracy": results["overall_accuracy"],
     }
-
-
-# train model on gpu
 
 
 trainer = Trainer(
@@ -208,10 +195,8 @@ trainer = Trainer(
     eval_dataset=val_dataset,
     compute_metrics=compute_metrics,
 )
-# trainer.add_callback(CustomCallback(trainer))
 
 trainer.train()
-
 trainer.evaluate()
 
 # # encode test data and predict
