@@ -14,6 +14,7 @@ import traceback
 
 
 
+
 path = '/home/anjani/pico-semeval2023/src/features/phase2'
 sys.path.append(path)
 print(sys.path)
@@ -45,6 +46,7 @@ from transformers import logging
 logging.set_verbosity_error()
 
 from train_pico import evaluate, train
+from train_pico_mtl import train_mtl
 
 # Set up the GPU
 os.environ["CUDA_VISIBLE_DEVICES"]="0"
