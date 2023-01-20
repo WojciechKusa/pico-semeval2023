@@ -89,11 +89,13 @@ def process_labels(x):
                 else:
                     i_coarsed.append( 0 )
 
-            elif ent == 'all_sep':
+            if ent == 'all_sep':
                 i_coarsed.append( i_i )
 
-            else:
-                if i_i != picos_mapping[ent] and i_i != 0:
+            if ent == 'participant' or ent == 'intervention' or ent == 'outcome':
+                if i_i == 0:
+                    i_coarsed.append( 0 )
+                if i_i == picos_mapping[ent] and i_i != 0:
                     i_coarsed.append( 0 )
                 if i_i != 0:
                     i_coarsed.append( 1 )
@@ -175,11 +177,10 @@ def fetch_val():
 
 
 # Load dataframe with PICO
-def load_data(input_directory, seed=None):
+def load_data(input_directory):
 
     # get arguments
     exp_args = getArguments() # get all the experimental arguments
-    seed_everything( int(seed) )
 
     train = 'st2_train_preprocessed.tsv'
     val = 'st2_val_preprocessed.tsv'
