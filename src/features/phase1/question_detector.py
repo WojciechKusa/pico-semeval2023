@@ -34,7 +34,7 @@ def detect_question_span(text: str) -> list[dict[str, str]]:
 
 def convert_span_to_prediction_format(
     text: str, question_spans: list[dict[str, str]]
-) -> list[int]:
+) -> np.ndarray:
     """Converts the question span to a prediction format.
     Args:
         text (str): The text to detect the question span in.
@@ -48,12 +48,29 @@ def convert_span_to_prediction_format(
             y_pred[question["start"] : question["end"]] = 1
     return y_pred
 
-if __name__ == "__main__":
+
+def convert_from_char_to_word(y_pred: np.ndarray | list[int], text: str) -> np.ndarray:
+    """Converts the prediction format from char to word level.
+    Args:
+        y_pred (list[int]): The prediction format.
+        text (str): The text to detect the question span in.
+    Returns:
+        list[int]: The prediction format.
+    """
+    y_pred_word = np.zeros(len(text.split()))
+    start_index = 0
+    for i, word in enumerate(text.split()):
+        if np.sum(y_pred[start_index : start_index + len(word)]) > 0:
+            y_pred_word[i] = 1
+        # y_pred = y_pred[len(word) :]
+        start_index += len(word) + 1  # add space hence +1
+    return y_pred_word
+
+
+def evaluate_question_detector():
     task_id = "1"
     data_type = "train"
-    input_file = (
-        f"../../../data/processed/st{task_id}_public_data/st{task_id}_{data_type}_parsed.tsv"
-    )
+    input_file = f"../../../data/processed/st{task_id}_public_data/st{task_id}_{data_type}_parsed.tsv"
     df = pd.read_csv(input_file, encoding="utf-8", sep="\t")
     df = df[df["labels_char"] != "N.A."]
     y_true = df["labels_char"].tolist()
@@ -65,7 +82,6 @@ if __name__ == "__main__":
         y_pred = convert_span_to_prediction_format(text, questions)
 
         out_preds.append(y_pred)
-
 
     result = sum(
         f1_score(y_true=first, y_pred=second, average="macro")
@@ -82,3 +98,52 @@ if __name__ == "__main__":
     print(cm)
     cm = confusion_matrix(y_true, y_pred)
     print(cm)
+
+
+if __name__ == "__main__":
+    task_id = "1"
+    data_type = "train"
+    input_file = f"../../../data/interim/st1_{data_type}_tokens.txt"
+
+    with open(input_file, "r", encoding="utf-8") as f:
+        lines = f.readlines()
+
+    reference_file = f"../../../data/external/st1_public_data/st1_{data_type}.csv"
+    df = pd.read_csv(reference_file, encoding="utf-8")
+
+    out_preds = []
+    for text in tqdm(lines):
+        if text == "[UNK]":
+            out_preds.append(np.zeros(1))
+            continue
+
+        questions = detect_question_span(text)
+        y_pred = convert_span_to_prediction_format(text, questions)
+        y_pred1 = convert_from_char_to_word(y_pred, text)
+
+        out_preds.append(y_pred1)
+
+    out_df = pd.DataFrame()
+    for index_post, (row, pred) in tqdm(enumerate(zip(df.iterrows(), out_preds))):
+        for index_word, p in enumerate(pred):
+            out_df = pd.concat(
+                [
+                    out_df,
+                    pd.DataFrame(
+                        {
+                            "text": row[1]["subreddit_id"],
+                            "post_id": row[1]["post_id"],
+                            "words": lines[index_post].split()[index_word],
+                            "labels_char": p,
+                        },
+                        index=[0],
+                    ),
+                ],
+                ignore_index=True,
+            )
+
+    out_df.to_csv(
+        f"../../../data/processed/st1_{data_type}_predictions.csv",
+        encoding="utf-8",
+        index=False,
+    )
