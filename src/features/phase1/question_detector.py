@@ -32,10 +32,27 @@ def detect_question_span(text: str) -> list[dict[str, str]]:
     return questions
 
 
+def convert_span_to_prediction_format(
+    text: str, question_spans: list[dict[str, str]]
+) -> list[int]:
+    """Converts the question span to a prediction format.
+    Args:
+        text (str): The text to detect the question span in.
+        question_spans (list[dict[str, str]]): The question spans.
+    Returns:
+        list[int]: The prediction format.
+    """
+    y_pred = np.zeros(len(text))
+    if question_spans:
+        for question in question_spans:
+            y_pred[question["start"] : question["end"]] = 1
+    return y_pred
+
 if __name__ == "__main__":
     task_id = "1"
+    data_type = "train"
     input_file = (
-        f"../../../data/processed/st{task_id}_public_data/st{task_id}_train_parsed.tsv"
+        f"../../../data/processed/st{task_id}_public_data/st{task_id}_{data_type}_parsed.tsv"
     )
     df = pd.read_csv(input_file, encoding="utf-8", sep="\t")
     df = df[df["labels_char"] != "N.A."]
@@ -45,14 +62,10 @@ if __name__ == "__main__":
     for text in tqdm(df["text"].tolist()):
         questions = detect_question_span(text)
 
-        y_pred = np.zeros(len(text))
-        if questions:
-            for question in questions:
-                y_pred[question["start"] : question["end"]] = 1
+        y_pred = convert_span_to_prediction_format(text, questions)
 
         out_preds.append(y_pred)
 
-    # df['question_pred'] = out_preds
 
     result = sum(
         f1_score(y_true=first, y_pred=second, average="macro")
