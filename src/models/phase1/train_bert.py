@@ -10,50 +10,11 @@ import evaluate
 
 import wandb
 
+from utils import encode_tags, PICODataset
+
 wandb.init(project="pico-semeval-task1")
 
-
-def encode_tags(tags, encodings):
-    labels = [[tag2id[tag] for tag in doc] for doc in tags]
-    encoded_labels = []
-    for id_x, (doc_labels, doc_offset) in enumerate(
-        zip(labels, encodings.offset_mapping)
-    ):
-        # print(id_x, doc_labels, doc_offset)
-        if id_x == 32:
-            print("stop")
-
-        curr_enc = encodings[id_x]
-        curr_text = texts[id_x]
-        # create an empty array of -100
-        doc_enc_labels = np.ones(len(doc_offset), dtype=int) * -100
-        arr_offset = np.array(doc_offset)
-        lower = arr_offset[:, 0] == 0
-        upper = arr_offset[:, 1] != 0
-        selected_mask = doc_enc_labels[
-            (arr_offset[:, 0] == 0) & (arr_offset[:, 1] != 0)
-        ]
-        # set labels whose first offset position is 0 and the second is not 0
-        doc_enc_labels[(arr_offset[:, 0] == 0) & (arr_offset[:, 1] != 0)] = doc_labels
-        encoded_labels.append(doc_enc_labels.tolist())
-    return encoded_labels
-
-
-class PICODataset(torch.utils.data.Dataset):
-    def __init__(self, encodings, labels):
-        self.encodings = encodings
-        self.labels = labels
-
-    def __getitem__(self, idx):
-        item = {key: torch.tensor(val[idx]) for key, val in self.encodings.items()}
-        item["labels"] = torch.tensor(self.labels[idx])
-        return item
-
-    def __len__(self):
-        return len(self.labels)
-
-
-data_path = "../../data/interim"
+data_path = "../../../data/interim"
 
 with open(f"{data_path}/st1_train_tokens.txt", "r") as f:
     texts = f.readlines()
@@ -122,8 +83,8 @@ encodings = tokenizer(
 )
 
 
-train_labels = encode_tags(train_tags, train_encodings)
-val_labels = encode_tags(val_tags, val_encodings)
+train_labels = encode_tags(train_tags, train_encodings, tag2id, texts)
+val_labels = encode_tags(val_tags, val_encodings, tag2id, texts)
 
 train_encodings.pop("offset_mapping")  # we don't want to pass this to the model
 val_encodings.pop("offset_mapping")
@@ -151,7 +112,7 @@ training_args = TrainingArguments(
     per_device_eval_batch_size=128,
     # warmup_steps=500,
     weight_decay=0.01,
-    logging_dir="../../reports",
+    logging_dir="../../../reports",
     logging_steps=10,
     report_to=["wandb"],
     full_determinism=True,
@@ -199,42 +160,46 @@ trainer = Trainer(
 trainer.train()
 trainer.evaluate()
 
-# # encode test data and predict
-# test_encodings = tokenizer(
-#     texts[:100],
-#     is_split_into_words=True,
-#     return_offsets_mapping=True,
-#     padding=True,
-#     truncation=True,
-# )
-# test_encodings.pop("offset_mapping")
-# test_dataset = PICODataset(test_encodings, tags)
-# test_predictions = trainer.predict(test_dataset)
-#
-# # get predictions
-# preds = np.argmax(test_predictions.predictions, axis=-1)
-# preds = [id2tag[x] for x in preds]
-#
-# # get true labels
-# true = [id2tag[x] for x in test_predictions.label_ids]
-#
-# # get test texts
-# test_texts = [tokenizer.convert_ids_to_tokens(x) for x in test_encodings["input_ids"]]
-# test_texts = [[x if x != "[UNK]" else "" for x in doc] for doc in test_texts]
-#
-# # get test tags
-# test_tags = [tokenizer.convert_ids_to_tokens(x) for x in test_encodings["input_ids"]]
-# test_tags = [[x if x != "[UNK]" else "" for x in doc] for doc in test_tags]
-#
-# # get test offsets
-# test_offsets = [tokenizer.decode(x, skip_special_tokens=True) for x in test_encodings["input_ids"]]
-# test_offsets = [[(x.start(), x.end()) for x in doc] for doc in test_offsets]
-#
-# # print results
-# for i in range(len(test_texts)):
-#     print("Text:", test_texts[i])
-#     print("True:", true[i])
-#     print("Pred:", preds[i])
-#     print("Tags:", test_tags[i])
-#     print("Offsets:", test_offsets[i])
-#     print()
+# save the model
+trainer.save_model(results_folder)
+
+
+# encode test data and predict
+test_encodings = tokenizer(
+    texts[:100],
+    is_split_into_words=True,
+    return_offsets_mapping=True,
+    padding=True,
+    truncation=True,
+)
+test_encodings.pop("offset_mapping")
+test_dataset = PICODataset(test_encodings, tags)
+test_predictions = trainer.predict(test_dataset)
+
+# get predictions
+preds = np.argmax(test_predictions.predictions, axis=-1)
+preds = [id2tag[x] for x in preds]
+
+# get true labels
+true = [id2tag[x] for x in test_predictions.label_ids]
+
+# get test texts
+test_texts = [tokenizer.convert_ids_to_tokens(x) for x in test_encodings["input_ids"]]
+test_texts = [[x if x != "[UNK]" else "" for x in doc] for doc in test_texts]
+
+# get test tags
+test_tags = [tokenizer.convert_ids_to_tokens(x) for x in test_encodings["input_ids"]]
+test_tags = [[x if x != "[UNK]" else "" for x in doc] for doc in test_tags]
+
+# get test offsets
+test_offsets = [tokenizer.decode(x, skip_special_tokens=True) for x in test_encodings["input_ids"]]
+test_offsets = [[(x.start(), x.end()) for x in doc] for doc in test_offsets]
+
+# print results
+for i in range(len(test_texts)):
+    print("Text:", test_texts[i])
+    print("True:", true[i])
+    print("Pred:", preds[i])
+    print("Tags:", test_tags[i])
+    print("Offsets:", test_offsets[i])
+    print()
