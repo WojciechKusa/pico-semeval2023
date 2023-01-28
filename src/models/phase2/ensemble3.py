@@ -68,36 +68,39 @@ from transformers import AdamW, BertConfig
 from transformers import get_linear_schedule_with_warmup
 
 # Import data getters
-from utilities.helper_functions import get_packed_padded_output
+from utilities.helper_functions import get_packed_padded_output, get_packed_padded_output_dataparallel
 
-class ENSEMBLE2(nn.Module):
+class ENSEMBLE3(nn.Module):
 
     def __init__(self, freeze_bert, tokenizer, model, exp_args):
-        super(ENSEMBLE2, self).__init__()
+        super(ENSEMBLE3, self).__init__()
 
         self.tokenizer = tokenizer
 
         #Instantiating BERT model object 
         self.transformer_layer = model
         transformer_dim = 768
+        pos_dim = 18
+        hidden_pos = pos_dim * 2
         
         #Freeze bert layers: if True, the freeze BERT weights
         if freeze_bert:
             for p in self.transformer_layer.parameters():
                 p.requires_grad = False
 
+        # dropout to regularize
         # self.dropout_layer = Dropout(p=0.8, inplace=False)
 
-        #Instantiating LSTM 
-        self.bidrec = exp_args.bidrec
-        self.lstm_hidden_dim = 512
+        # POS encoder
+        if exp_args.bidrec == True and exp_args.pos_encoding == 'lstm':
+            self.lstmpos_layer = nn.LSTM(input_size=pos_dim, hidden_size = hidden_pos, num_layers = 1, bidirectional=exp_args.bidrec, batch_first=True)
 
-
-        # lstm layer for POS tags and the embeddings
-        self.lstm_layer = nn.LSTM(input_size=transformer_dim, hidden_size = self.lstm_hidden_dim, num_layers = 1, bidirectional=exp_args.bidrec, batch_first=True)
 
         # log reg predictor
-        self.hidden2tag = nn.Linear(transformer_dim*2, exp_args.num_labels)
+        if exp_args.bidrec == True and exp_args.pos_encoding == 'lstm':
+            self.hidden2tag = nn.Linear(transformer_dim + ( hidden_pos * 2 ), exp_args.num_labels)
+        else:
+            self.hidden2tag = nn.Linear(transformer_dim+pos_dim, exp_args.num_labels)
 
         if exp_args.predictor == 'crf':
             # crf layer
@@ -105,7 +108,6 @@ class ENSEMBLE2(nn.Module):
 
         # loss calculation
         self.loss_fct = nn.CrossEntropyLoss()
-
 
     def get_loss(self, probablities_masked, labels_masked ):
 
@@ -118,28 +120,7 @@ class ENSEMBLE2(nn.Module):
 
         return average_loss
 
-    def apply_bilstm(self, sequence_output, attention_mask, tokenizer):
-
-        # lstm with masks (same as attention masks)
-        packed_input, perm_idx, seq_lengths = get_packed_padded_output(sequence_output, attention_mask, tokenizer)
-        packed_output, (ht, ct) = self.lstm_layer(packed_input)
-
-        # Unpack and reorder the output
-        output, input_sizes = pad_packed_sequence(packed_output, batch_first=True)
-        _, unperm_idx = perm_idx.sort(0)
-        lstm_output = output[unperm_idx] # lstm_output.shape = shorter than the padded torch.Size([6, 388, 512])
-        seq_lengths_ordered = seq_lengths[unperm_idx]
-
-        # Expands the shortended LSTM output to original
-        lstm_repadded = torch.zeros( size= (lstm_output.shape[0], sequence_output.shape[1], sequence_output.shape[2]*2 ) )
-        lstm_repadded[ :, :lstm_output.shape[1], :lstm_output.shape[2] ] = lstm_output
-        lstm_repadded = lstm_repadded.cuda()
-
-        return lstm_repadded
-
     def forward(self, input_ids=None, attention_mask=None, labels=None, labels_fine=None, input_pos=None, input_offs=None, input_char_encode=None, input_char_ortho=None, mode = None, args = None):
-        
-        tokenizer = self.tokenizer
 
         # Transformer
         outputs = self.transformer_layer(
@@ -151,9 +132,23 @@ class ENSEMBLE2(nn.Module):
         # dropout layer
         # sequence_output = self.dropout_layer( sequence_output )
 
-        # pass transformer output from BiLSTM layer
-        lstm_output = self.apply_bilstm(sequence_output, attention_mask, tokenizer)
+        # LSTM encode the POS tags
+        if args.pos_encoding == 'lstm':
+            packed_pos_input, pos_perm_idx, pos_seq_lengths, total_length_pos = get_packed_padded_output_dataparallel(input_pos.float(), attention_mask)
+            self.lstmpos_layer.flatten_parameters()
+            packed_pos_output, (ht_pos, ct_pos) = self.lstmpos_layer(packed_pos_input)
+            pos_output, pos_input_sizes = pad_packed_sequence(packed_pos_output, batch_first=True, total_length=total_length_pos)
+            _, unperm_idx = pos_perm_idx.sort(0)
+            lstm_pos_output = pos_output[unperm_idx]
 
+        # Concat POS tags with embedding output
+        if args.pos_encoding == 'lstm':
+            sequence_output_concat = torch.cat( (sequence_output, lstm_pos_output), 2) # concatenate at dim 2 for embeddings and tags
+            sequence_output_concat = sequence_output_concat.cuda()
+        if args.pos_encoding == 'onehot':
+            sequence_output_concat = torch.cat( (sequence_output, input_pos), 2) # concatenate at dim 2 for embeddings and tags
+            sequence_output_concat = sequence_output_concat.cuda()
+        
         # mask the unimportant tokens before log_reg
         mask = (
             (input_ids != self.tokenizer.pad_token_id)
@@ -162,13 +157,14 @@ class ENSEMBLE2(nn.Module):
             & (labels != 100)
         )
 
-        mask_expanded = mask.unsqueeze(-1).expand(sequence_output.size())
-        sequence_output *= mask_expanded.float()
+        # expand the mask according the concatenated sequence output and POS tags
+        mask_expanded = mask.unsqueeze(-1).expand(sequence_output_concat.size())
+        sequence_output_concat *= mask_expanded.float()
 
         labels_masked = labels * mask.long()
 
         # linear layer (log reg) to emit class probablities
-        probablities = F.relu ( self.hidden2tag( lstm_output ) )
+        probablities = F.relu ( self.hidden2tag( sequence_output_concat ) )
         probablities_mask_expanded = mask.unsqueeze(-1).expand(probablities.size())
         probablities_masked = probablities * probablities_mask_expanded.float()
 
