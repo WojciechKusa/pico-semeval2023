@@ -1,3 +1,5 @@
+from typing import Union
+
 import pandas as pd
 import re
 import numpy as np
@@ -49,7 +51,7 @@ def convert_span_to_prediction_format(
     return y_pred
 
 
-def convert_from_char_to_word(y_pred: np.ndarray | list[int], text: str) -> np.ndarray:
+def convert_from_char_to_word(y_pred: Union[np.ndarray, list[int]], text: str) -> np.ndarray:
     """Converts the prediction format from char to word level.
     Args:
         y_pred (list[int]): The prediction format.
@@ -102,7 +104,7 @@ def evaluate_question_detector():
 
 if __name__ == "__main__":
     task_id = "1"
-    data_type = "train"
+    data_type = "test"
     input_file = f"../../../data/interim/st1_{data_type}_tokens.txt"
 
     with open(input_file, "r", encoding="utf-8") as f:
