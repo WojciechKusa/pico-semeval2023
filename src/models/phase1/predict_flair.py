@@ -1,32 +1,32 @@
-from flair.data import Corpus
-from flair.datasets import ColumnCorpus
-from flair.models import SequenceTagger
-
+import os
 from flair.data import Sentence
 from flair.models import SequenceTagger
-# load the trained model
-
 
 import argparse
 
 
-if __name__ == '__main__':
-
-
+if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--model_path", type=str, default="results/flair/final-model.pt")
+    parser.add_argument(
+        "--model_path", type=str, default="results/flair/final-model.pt"
+    )
+    parser.add_argument("--results_path", type=str, default="results/flair/")
+    parser.add_argument(
+        "--test_dataset_file", type=str, default="data/interim/st1_test_tokens.txt"
+    )
+    parser.add_argument("--output_file", type=str, default="st1_test_flair.txt")
 
     args = parser.parse_args()
 
     model = SequenceTagger.load(args.model_path)
-    # create example sentence
 
-    test_dataset_file = "data/interim/st1_test_tokens.txt"
-    with open(test_dataset_file, "r") as f:
+    with open(args.test_dataset_file, "r") as f:
         texts = f.readlines()
 
+    if not os.path.exists(args.output_path):
+        os.makedirs(args.output_path)
 
-    output_file = "results/flair/st1_test_flair.txt"
+    output_file = f"{args.output_path}/{args.output_file}"
     predictions = []
     for text in texts:
         sentence = Sentence(text)
