@@ -10,7 +10,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--model_path", type=str, default="results/flair/final-model.pt"
     )
-    parser.add_argument("--results_path", type=str, default="results/flair/")
+    parser.add_argument("--output_path", type=str, default="results/flair/")
     parser.add_argument(
         "--test_dataset_file", type=str, default="data/interim/st1_test_tokens.txt"
     )
