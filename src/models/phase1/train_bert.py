@@ -38,8 +38,8 @@ texts = [x for x in texts if x != ['UNK']]
 print(len(texts), len(tags))
 
 
-# texts = texts[:500]
-# tags = tags[:500]
+texts = texts[:100]
+tags = tags[:100]
 
 # keep only first 400 tokens in tags list
 tags = [x[:260] for x in tags]
@@ -91,7 +91,9 @@ val_encodings.pop("offset_mapping")
 train_dataset = PICODataset(train_encodings, train_labels)
 val_dataset = PICODataset(val_encodings, val_labels)
 
-results_folder = f"../../data/results/{model_name}"
+
+results_folder = f"../../data/results/26jan/{model_name}"
+# results_folder = f"/newstorage5/wkusa/models/pico/{model_name}"
 if not os.path.exists(results_folder):
     os.makedirs(results_folder)
 
@@ -106,7 +108,7 @@ model.to(device)
 
 training_args = TrainingArguments(
     output_dir=results_folder,
-    num_train_epochs=20,
+    num_train_epochs=2,
     evaluation_strategy = "epoch",
     per_device_train_batch_size=64,
     per_device_eval_batch_size=128,

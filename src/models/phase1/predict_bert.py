@@ -27,16 +27,16 @@ texts = [[x if x != "" else "[UNK]" for x in doc] for doc in texts]
 
 
 
-with open(f"{data_path}/st1_test_bio_tokens.txt", "r") as f:
+with open(f"{data_path}/st1_train_bio_tokens.txt", "r") as f:
     tags = f.readlines()
 tags = [x.split() for x in tags]
 print("loaded")
 
 print(len(texts), len(tags))
-# remove rows from tags and texts when text == [UNK]
-tags = [y for x, y in zip(texts, tags) if x != ['UNK']]
-texts = [x for x in texts if x != ['UNK']]
-print(len(texts), len(tags))
+# # remove rows from tags and texts when text == [UNK]
+# tags = [y for x, y in zip(texts, tags) if x != ['UNK']]
+# texts = [x for x in texts if x != ['UNK']]
+# print(len(texts), len(tags))
 
 
 model_name = "distilbert-base-uncased"
@@ -52,7 +52,7 @@ print(id2tag)
 print(label_list)
 
 
-path_to_model = f"../../data/results/{model_name}"
+path_to_model = f"/newstorage5/wkusa/models/pico/{model_name}"
 model = DistilBertForTokenClassification.from_pretrained(
     path_to_model,
     num_labels=len(label_list),
@@ -71,32 +71,44 @@ test_encodings = tokenizer(
 )
 test_encodings.pop("offset_mapping")
 test_dataset = PICODataset(test_encodings, tags)
-test_predictions = model.predict(test_dataset)
 
-# get predictions
-preds = np.argmax(test_predictions.predictions, axis=-1)
-preds = [id2tag[x] for x in preds]
+# encode test data and predict
+# make predictions on test data
 
-# get true labels
-true = [id2tag[x] for x in test_predictions.label_ids]
 
-# get test texts
-test_texts = [tokenizer.convert_ids_to_tokens(x) for x in test_encodings["input_ids"]]
-test_texts = [[x if x != "[UNK]" else "" for x in doc] for doc in test_texts]
 
-# get test tags
-test_tags = [tokenizer.convert_ids_to_tokens(x) for x in test_encodings["input_ids"]]
-test_tags = [[x if x != "[UNK]" else "" for x in doc] for doc in test_tags]
+# evaluate
 
-# get test offsets
-test_offsets = [tokenizer.decode(x, skip_special_tokens=True) for x in test_encodings["input_ids"]]
-test_offsets = [[(x.start(), x.end()) for x in doc] for doc in test_offsets]
 
-# print results
-for i in range(len(test_texts)):
-    print("Text:", test_texts[i])
-    print("True:", true[i])
-    print("Pred:", preds[i])
-    print("Tags:", test_tags[i])
-    print("Offsets:", test_offsets[i])
-    print()
+#
+# test_predictions = model.predict(test_dataset)
+#
+# # get predictions
+# preds = np.argmax(test_predictions.predictions, axis=-1)
+# preds = [id2tag[x] for x in preds]
+#
+# # get true labels
+# true = [id2tag[x] for x in test_predictions.label_ids]
+#
+# # get test texts
+# test_texts = [tokenizer.convert_ids_to_tokens(x) for x in test_encodings["input_ids"]]
+# test_texts = [[x if x != "[UNK]" else "" for x in doc] for doc in test_texts]
+#
+# # # get test tags
+# # test_tags = [tokenizer.convert_ids_to_tokens(x) for x in test_encodings["input_ids"]]
+# # test_tags = [[x if x != "[UNK]" else "" for x in doc] for doc in test_tags]
+#
+# # get test offsets
+# test_offsets = [tokenizer.decode(x, skip_special_tokens=True) for x in test_encodings["input_ids"]]
+# test_offsets = [[(x.start(), x.end()) for x in doc] for doc in test_offsets]
+#
+# # print results
+# for i in range(len(test_texts)):
+#     print("Text:", test_texts[i])
+#     print("True:", true[i])
+#     print("Pred:", preds[i])
+#     # print("Tags:", test_tags[i])
+#     # print("Offsets:", test_offsets[i])
+#     print()
+
+
