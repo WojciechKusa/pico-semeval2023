@@ -1,4 +1,4 @@
-from typing import Union
+from typing import Union, Optional
 
 import pandas as pd
 import re
@@ -35,7 +35,7 @@ def detect_question_span(text: str) -> list[dict[str, str]]:
 
 
 def convert_span_to_prediction_format(
-    text: str, question_spans: list[dict[str, str]]
+    text: str, question_spans: list[dict[str, str]], label_mapping: Optional[dict] = None
 ) -> np.ndarray:
     """Converts the question span to a prediction format.
     Args:
@@ -47,7 +47,10 @@ def convert_span_to_prediction_format(
     y_pred = np.zeros(len(text))
     if question_spans:
         for question in question_spans:
-            y_pred[question["start"] : question["end"]] = 1
+            if label_mapping:
+                y_pred[question["start"] : question["end"]] = label_mapping[question["label"]]
+            else:
+                y_pred[question["start"] : question["end"]] = 1
     return y_pred
 
 
@@ -63,8 +66,9 @@ def convert_from_char_to_word(y_pred: Union[np.ndarray, list[int]], text: str) -
     start_index = 0
     for i, word in enumerate(text.split()):
         if np.sum(y_pred[start_index : start_index + len(word)]) > 0:
-            y_pred_word[i] = 1
-        # y_pred = y_pred[len(word) :]
+            # take the most frequent label in the span
+            label = np.argmax(np.bincount(y_pred.astype(int)[start_index : start_index + len(word)]))
+            y_pred_word[i] = label
         start_index += len(word) + 1  # add space hence +1
     return y_pred_word
 
@@ -133,10 +137,10 @@ if __name__ == "__main__":
                     out_df,
                     pd.DataFrame(
                         {
-                            "text": row[1]["subreddit_id"],
+                            "subreddit_id": row[1]["subreddit_id"],
                             "post_id": row[1]["post_id"],
                             "words": lines[index_post].split()[index_word],
-                            "labels_char": p,
+                            "labels": p,
                         },
                         index=[0],
                     ),
