@@ -38,12 +38,12 @@ texts = [x for x in texts if x != ['UNK']]
 print(len(texts), len(tags))
 
 
-texts = texts[:100]
-tags = tags[:100]
+texts = texts[:10]
+tags = tags[:10]
 
 # keep only first 400 tokens in tags list
-tags = [x[:260] for x in tags]
-texts = [x[:260] for x in texts]
+tags = [x[:360] for x in tags]
+texts = [x[:360] for x in texts]
 
 train_texts, val_texts, train_tags, val_tags = train_test_split(
     texts, tags, test_size=0.2, random_state=42
@@ -74,17 +74,8 @@ val_encodings = tokenizer(
     truncation=True,
 )
 
-encodings = tokenizer(
-    texts,
-    is_split_into_words=True,
-    return_offsets_mapping=True,
-    padding=True,
-    truncation=True,
-)
-
-
-train_labels = encode_tags(train_tags, train_encodings, tag2id, texts)
-val_labels = encode_tags(val_tags, val_encodings, tag2id, texts)
+train_labels = encode_tags(train_tags, train_encodings, tag2id, train_texts)
+val_labels = encode_tags(val_tags, val_encodings, tag2id, val_texts)
 
 train_encodings.pop("offset_mapping")  # we don't want to pass this to the model
 val_encodings.pop("offset_mapping")
