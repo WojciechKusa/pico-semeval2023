@@ -1,8 +1,6 @@
 import numpy as np
 import torch
 
-# from src.models.phase1.train_bert import tag2id, texts
-
 
 def encode_tags(tags, encodings, tag2id, texts):
     labels = [[tag2id[tag] for tag in doc] for doc in tags]
@@ -36,7 +34,7 @@ class PICODataset(torch.utils.data.Dataset):
         self.labels = labels
 
     def __getitem__(self, idx):
-        item = {key: torch.tensor(val[idx]) for key, val in self.encodings.items()}
+        item = {key: torch.tensor(value[idx]) for key, value in self.encodings.items()}
         item["labels"] = torch.tensor(self.labels[idx])
         return item
 
