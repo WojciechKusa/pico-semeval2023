@@ -45,15 +45,18 @@ def train_ner_model(
         use_crf=True,
         use_rnn=False,
         reproject_embeddings=False,
+        # tag_format="BIO"
     )
 
     trainer: ModelTrainer = ModelTrainer(tagger, corpus)
 
     trainer.fine_tune(
         model_output_file,
-        learning_rate=5.0e-4,
-        max_epochs=30,
+        learning_rate=5.0e-6,
+        max_epochs=25,
         mini_batch_size=32,
+        train_with_dev=False,
+        mini_batch_chunk_size=1,
     )
 
 

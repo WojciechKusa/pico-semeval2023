@@ -84,7 +84,7 @@ if __name__ == "__main__":
             )
 
     out_df.to_csv(
-        f"data/processed/flair_submission.csv",
+        output_file,
         encoding="utf-8",
         index=False,
     )
